@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { Calendar, MapPin, Search, Ticket } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Calendar, MapPin, Search, Ticket, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { matches, phaseLabels, formatMatchDate, MatchPhase } from '@/data/matches';
@@ -44,8 +44,17 @@ const TeamDisplay: React.FC<{ team: Team; showCode?: boolean }> = ({ team, showC
 };
 
 const Matches: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const groupFilter = searchParams.get('group')?.toUpperCase() || '';
+
   const [selectedPhase, setSelectedPhase] = useState<MatchPhase | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const clearGroupFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('group');
+    setSearchParams(next, { replace: true });
+  };
 
   const filteredMatches = useMemo(() => {
     return matches.filter(match => {
@@ -53,25 +62,28 @@ const Matches: React.FC = () => {
       const awayTeam = getTeamById(match.awayTeamId);
       const stadium = getStadiumById(match.stadiumId);
 
+      // Group filter (vindo do botão "Ver jogos do grupo")
+      if (groupFilter && match.group?.toUpperCase() !== groupFilter) return false;
+
       // Phase filter
       if (selectedPhase !== 'all' && match.phase !== selectedPhase) return false;
 
       // Search filter - only search real teams
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        const matchesSearch = 
+        const matchesSearch =
           (!homeTeam?.isTBD && homeTeam?.name.toLowerCase().includes(query)) ||
           (!awayTeam?.isTBD && awayTeam?.name.toLowerCase().includes(query)) ||
           stadium?.name.toLowerCase().includes(query) ||
           stadium?.city.toLowerCase().includes(query) ||
           phaseLabels[match.phase].toLowerCase().includes(query);
-        
+
         if (!matchesSearch) return false;
       }
 
       return true;
     });
-  }, [selectedPhase, searchQuery]);
+  }, [groupFilter, selectedPhase, searchQuery]);
 
   return (
     <div className="min-h-screen py-12">
@@ -122,6 +134,21 @@ const Matches: React.FC = () => {
             ))}
           </div>
         </div>
+
+        {/* Active filter chip (Grupo) */}
+        {groupFilter && (
+          <div className="mb-4 flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-muted-foreground">Filtro ativo:</span>
+            <button
+              type="button"
+              onClick={clearGroupFilter}
+              className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors"
+            >
+              Grupo {groupFilter}
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Results count */}
         <p className="text-sm text-muted-foreground mb-6">
@@ -216,7 +243,7 @@ const Matches: React.FC = () => {
         {filteredMatches.length === 0 && (
           <div className="text-center py-20">
             <p className="text-muted-foreground mb-4">Nenhum jogo encontrado com os filtros selecionados.</p>
-            <Button variant="outline" onClick={() => { setSelectedPhase('all'); setSearchQuery(''); }}>
+            <Button variant="outline" onClick={() => { setSelectedPhase('all'); setSearchQuery(''); clearGroupFilter(); }}>
               Limpar filtros
             </Button>
           </div>
