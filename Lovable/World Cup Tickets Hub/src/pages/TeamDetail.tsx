@@ -19,6 +19,13 @@ const POSITION_COLORS: Record<string, string> = {
   ATA: 'bg-red-500/15 text-red-600 dark:text-red-400',
 };
 
+const POSITION_GROUPS: { code: 'GOL' | 'DEF' | 'MEI' | 'ATA'; label: string }[] = [
+  { code: 'GOL', label: 'Goleiros' },
+  { code: 'DEF', label: 'Defensores' },
+  { code: 'MEI', label: 'Meio-campistas' },
+  { code: 'ATA', label: 'Atacantes' },
+];
+
 const TeamDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const team = id ? getTeamById(id) : undefined;
@@ -117,11 +124,22 @@ const TeamDetail: React.FC = () => {
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <CardTitle className="font-display text-2xl flex items-center gap-2">
                         <ClipboardList className="w-6 h-6 text-primary" />
-                        Time Base Atual
+                        {squad.official ? 'Convocados Oficiais' : 'Lista Provável'}
                       </CardTitle>
-                      <Badge variant="outline" className="font-mono">
-                        {squad.formation}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        {squad.official ? (
+                          <Badge className="bg-green-500/15 text-green-600 dark:text-green-400 border-green-500/30">
+                            Copa 2026
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-500/40">
+                            Oficial em breve
+                          </Badge>
+                        )}
+                        <Badge variant="outline" className="font-mono">
+                          {squad.formation}
+                        </Badge>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-6">
@@ -132,9 +150,12 @@ const TeamDetail: React.FC = () => {
                         <div className="text-xs text-muted-foreground">Treinador</div>
                         <div className="font-medium">
                           {squad.coach.name}
-                          <span className="text-muted-foreground text-sm font-normal">
-                            {' · '}{squad.coach.nationality}{' · desde '}{squad.coach.since}
-                          </span>
+                          {(squad.coach.nationality || squad.coach.since) && (
+                            <span className="text-muted-foreground text-sm font-normal">
+                              {squad.coach.nationality ? ` · ${squad.coach.nationality}` : ''}
+                              {squad.coach.since ? ` · desde ${squad.coach.since}` : ''}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -154,57 +175,57 @@ const TeamDetail: React.FC = () => {
                       </p>
                     </div>
 
-                    {/* Starting XI */}
-                    <div>
-                      <h4 className="text-sm font-medium text-foreground mb-3">11 titulares</h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {squad.startingXI.map((player) => (
-                          <div
-                            key={`${player.name}-${player.club}`}
-                            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/40 border border-border/40"
-                          >
-                            <span
-                              className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                                POSITION_COLORS[player.position] || ''
-                              }`}
-                            >
-                              {player.position}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate">{player.name}</div>
-                              <div className="text-xs text-muted-foreground truncate">
-                                {player.club}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                    {/* Convocados — agrupados por posição */}
+                    <div className="space-y-5">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium text-foreground">
+                          {squad.official ? 'Convocados' : 'Lista provável'}
+                        </h4>
+                        <span className="text-xs text-muted-foreground">
+                          {squad.players.length} jogadores
+                        </span>
                       </div>
-                    </div>
-
-                    {/* Reservas-chave */}
-                    {squad.reserves && squad.reserves.length > 0 && (
-                      <div>
-                        <h4 className="text-sm font-medium text-foreground mb-3">Reservas-chave</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {squad.reserves.map((player) => (
-                            <span
-                              key={`${player.name}-${player.club}`}
-                              className="text-xs px-2.5 py-1 rounded-full bg-secondary/60 border border-border/40"
-                              title={player.club}
-                            >
+                      {POSITION_GROUPS.map((group) => {
+                        const groupPlayers = squad.players.filter(
+                          (player) => player.position === group.code
+                        );
+                        if (groupPlayers.length === 0) return null;
+                        return (
+                          <div key={group.code}>
+                            <div className="flex items-center gap-2 mb-2">
                               <span
-                                className={`font-mono font-bold mr-1 ${
-                                  POSITION_COLORS[player.position]?.split(' ').slice(1).join(' ') || ''
+                                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                                  POSITION_COLORS[group.code] || ''
                                 }`}
                               >
-                                {player.position}
+                                {group.code}
                               </span>
-                              {player.name}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                              <h5 className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+                                {group.label}
+                              </h5>
+                              <span className="text-xs text-muted-foreground">
+                                ({groupPlayers.length})
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {groupPlayers.map((player) => (
+                                <div
+                                  key={`${player.name}-${player.club}`}
+                                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/40 border border-border/40"
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-medium truncate">{player.name}</div>
+                                    <div className="text-xs text-muted-foreground truncate">
+                                      {player.club}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
 
                     {/* Última convocação */}
                     <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
