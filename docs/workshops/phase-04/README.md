@@ -288,3 +288,23 @@ Regras (NON-NEGOTIABLE, do código real):
 - [ ] Tenho minha **Function F1**, meu **gateway F2** e a **identidade F3** funcionando, e acesso ao Portal Azure com uma subscription ativa
 
 Nos vemos na aula. Próximo artefato que você vai usar: [`PORTAL-GUIDE.md`](./PORTAL-GUIDE.md), a partir do Bloco 2 (criar o Container Apps Environment e o n8n).
+
+---
+
+## 9. Nota de continuidade — Reutilização do padrão webhook em F5+ (Fase B)
+
+> **Para onde este padrão vai depois.** Esta nota foi adicionada quando a F5 ganhou uma extensão agêntica (Fase B, [Story 2.9](../../stories/2.9.story.md)). Você **não precisa** dela para a aula da F4 — ela existe para mostrar que o conceito que você aprende aqui **não morre na F4**: ele é reaproveitado mais à frente, num contexto diferente.
+
+O **padrão de webhook fire-and-forget** que você acabou de estudar (seção 5) é a parte mais reutilizável desta fase. Na F4 quem dispara o webhook é o **consumer F1** (depois de gravar a compra). Na **Fase B da F5**, quem dispara um webhook para o n8n é uma **tool do chatbot** — a primeira tool de **ação** (`criar_alerta_ingresso`), acionada quando o usuário pede "me avise quando abrir ingresso para a final".
+
+O importante: **as regras de engenharia são exatamente as mesmas** que você leu na seção 5 e nos contratos da seção 6 — só muda **quem aperta o gatilho**. Nada do conteúdo de F4 abaixo é re-explicado lá; a Fase B **referencia** este guia.
+
+| Regra (origem nesta F4) | Como a Fase B (F5) a reaproveita |
+|---|---|
+| **URL via App Setting, nunca hardcoded** (seção 6.5 — `N8N_WEBHOOK_URL`) | A tool de ação lê **`N8N_ALERT_WEBHOOK_URL`** — um App Setting **distinto** (`_ALERT_`), apontando para outro workflow no n8n, para não misturar o fluxo de compra com o fluxo de alerta. |
+| **Timeout de 5s** (seção 5) | Idêntico: `CancellationTokenSource` encadeado, `CancelAfter(5s)`. |
+| **Falha capturada, nunca re-lançada** (seção 5 — fire-and-forget) | Idêntico: timeout/rede/non-2xx viram `false` + `LogWarning`; a tool retorna `{ registrado: false }` sem estourar exceção. Aqui não há DLQ (não é um consumer de fila), mas a filosofia "o secundário nunca derruba o principal" é a mesma. |
+| **No-op silencioso se não configurado** (seção 6.5) | Idêntico: sem `N8N_ALERT_WEBHOOK_URL`, a tool responde `{ registrado: false, mensagem: "Webhook de alerta não configurado neste ambiente." }`. |
+| **`correlationId` propagado** (seções 5 e 6) | Idêntico em espírito: a tool gera um **novo GUID** `correlationId` por disparo e o propaga em cada node do workflow do n8n (rastreabilidade rumo à F6). |
+
+> **O que muda de fato na Fase B (e por isso ela é uma fase nova, não uma repetição):** na F4 o destino do webhook é um workflow **determinístico** (Webhook → Switch → HTTP/Set). Na Fase B o destino é um workflow **agêntico** — um nó **AI Agent** com seu próprio LLM, que decide sozinho **como** reagir ao alerta. O canal (webhook fire-and-forget) é o mesmo que você domina aqui; o que está do outro lado da tomada é que ficou mais inteligente. O detalhamento desse lado agêntico está no guia da [F5, seção "Fase B — A primeira mão"](../phase-05/README.md).

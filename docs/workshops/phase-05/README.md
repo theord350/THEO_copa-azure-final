@@ -348,3 +348,109 @@ Antes de entrar na F5, confirme:
 - [ ] Tenho o repositório na branch `phase-05-ai-mcp`.
 
 > **Próximo passo:** na aula, você provisiona o MCP Server como Container App, configura as App Settings (keys + SQL), faz o build do front com as `VITE_*` e roda os 3 smoke tests ao vivo. O passo-a-passo está no [PORTAL-GUIDE](./PORTAL-GUIDE.md).
+
+---
+
+## 10. Fase B — A primeira mão (`criar_alerta_ingresso`)
+
+> **Extensão agêntica da F5** · [Story 2.9](../../stories/2.9.story.md) · **Decisão de arquitetura:** [ADE-006 v1.1 — Chatbot como interface agêntica](../../architecture/ade-006-chatbot-agentic-interface.md) (Invariantes 1/2/4/7).
+> **Continuidade:** sobre a [Fase A (S2.8, seção 3.5)](#35-fase-a--sentidos-completos-tools-4-7--story-28) — que completou os **sentidos** (7 tools read-only) — e reaproveita o **padrão de webhook fire-and-forget da [F4](../phase-04/README.md#5-o-padrão-fire-and-forget-por-que-o-consumer-não-pode-esperar-pelo-n8n)**.
+
+Até a Fase A, o chatbot só tinha **sentidos**: 7 tools `ReadOnly = true` que **leem** o banco e nunca o modificam. Ele sabia tudo, mas não **fazia** nada. A Fase B dá ao chatbot a **primeira mão**: uma tool que **age** sobre o mundo — `criar_alerta_ingresso`, a primeira tool com `ReadOnly = false` do projeto.
+
+> **A frase âncora da Fase B:** "Sentidos leem; mãos agem — mas mãos não tocam o SQL." A mão (`criar_alerta_ingresso`) **não escreve no banco**: ela apenas **dispara um webhook** para o n8n. A regra de ouro da F5 ("o LLM raciocina; o MCP Server tem os fatos; o MCP Server **nunca grava**") continua intacta — a ação não vira INSERT no SQL, vira um **disparo de orquestração**.
+
+### 10.1 O contrato da tool
+
+| Campo | Valor |
+|---|---|
+| **Nome** | `criar_alerta_ingresso` |
+| **Discriminador** | `ReadOnly = false` (omitido — o default do SDK é `false`). É a **única** das 8 tools sem `readOnly: true`. |
+| **Description (PT-BR, exata)** | "Cria um alerta para avisar quando ingressos ficarem disponíveis para uma partida. Aciona uma automação de orquestração no n8n. Use quando o usuário pedir para ser avisado ou monitorar disponibilidade de ingresso para um jogo." |
+| **Parâmetros** | `matchId` (int?, opcional) · `matchDescription` (string?, opcional) — **pelo menos um dos dois** é obrigatório · `categoria` (string?, opcional: `'VIP'`/`'Cat1'`/`'Cat2'`, mapeada pelo `CategoryLabelMapper` para o rótulo real `'VIP Premium'`/`'Categoria 1'`/`'Categoria 2'`, ou `null` se desconhecida — anti-alucinação) |
+| **Retorno** | `{ registrado: bool, mensagem: string }` (PT-BR) |
+
+Como toda mão dispara um webhook (e não um SELECT), ela segue o **padrão fire-and-forget da [F4](../phase-04/README.md#5-o-padrão-fire-and-forget-por-que-o-consumer-não-pode-esperar-pelo-n8n)** — sem re-explicar aqui o que aquele guia já cobre:
+
+- **App Setting `N8N_ALERT_WEBHOOK_URL`** (distinto do `N8N_WEBHOOK_URL` de compra da F4 — outro workflow no n8n), nunca hardcoded.
+- **Timeout de 5s**, falha **nunca re-lançada** (timeout/rede/non-2xx → `{ registrado: false }`).
+- **No-op silencioso** se o App Setting estiver ausente → `{ registrado: false, mensagem: "Webhook de alerta não configurado neste ambiente." }`.
+
+O payload enviado ao n8n contém: `correlationId` (GUID novo por disparo, rastreabilidade rumo à F6), `entraOid` (a identidade da F3 viajando **como dado no corpo**, não como Bearer — Invariante 7; nunca aparece em log), `matchId`, `matchDescription`, `categoria` (rótulo real ou `null`) e `requestedAt` (ISO 8601 UTC).
+
+### 10.2 Dois agentes cooperando — o fluxo
+
+A grande ideia da Fase B é que **dois agentes de IA cooperam**, cada um com um papel: o **front (Gemini 2.5 Flash + 8 tools)** decide **O QUÊ** fazer; o **AI Agent dentro do n8n** decide **O COMO** executar. O webhook é a fronteira entre os dois cérebros.
+
+```
+┌─────────────────────┐   "Me avise quando abrir         AGENTE 1 (front)
+│  Chatbot React      │    ingresso VIP para a final"     decide O QUÊ
+│  Gemini 2.5 Flash   │
+└──────────┬──────────┘   chama criar_alerta_ingresso(matchDescription:"final", categoria:"VIP")
+           │ Bearer Entra (F3)
+           ▼
+┌─────────────────────┐   valida JWT · injeta X-Entra-OID · X-Correlation-ID
+│  Gateway YARP (F2)  │   (POST /mcp — não cacheado; cache é GET-only)
+└──────────┬──────────┘
+           ▼
+┌─────────────────────┐   tool ReadOnly=false dispara webhook FIRE-AND-FORGET
+│  McpServer /mcp     │   payload: { correlationId, entraOid, matchId,
+│  criar_alerta_...   │             matchDescription, categoria, requestedAt }
+└──────────┬──────────┘   → retorna { registrado:true } SEM esperar o n8n terminar
+           │ POST N8N_ALERT_WEBHOOK_URL
+           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  n8n — workflow "chat-alert-ingresso"            AGENTE 2 (n8n)  │
+│                                                  decide O COMO   │
+│   [Webhook trigger] → [AI Agent] ── LLM: "Google Gemini Chat    │
+│                            │         Model" (credencial          │
+│                            │         GooglePalmApi)              │
+│                            │                                     │
+│                            └─ usa [MCP Client Tool] ────────┐    │
+│                               (transporte httpStreamable)   │    │
+│   [HTTP Request mock] ← redige notificação                  │    │
+│    httpbin.org/post                                         │    │
+│    { correlationId, entraOid, mensagem_redigida }           │    │
+└─────────────────────────────────────────────────────────────┼────┘
+                                                               │
+        leste-oeste (DNS interno, BYPASSA o gateway — Inv 7)   │
+                                                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  McpServer interno (ingress interno)                            │
+│  ...internal.<env>.brazilsouth.azurecontainerapps.io/mcp        │
+│  AI Agent consulta consultar_disponibilidade (SENTIDO read-only) │
+│  → regra de ouro preservada também no Agente 2: nenhuma escrita  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+> **As duas conexões ao McpServer são diferentes — e isso é o ouro arquitetural.** A primeira (chatbot → McpServer) passa **pelo gateway YARP** (norte-sul, autenticada com Bearer Entra). A segunda (AI Agent do n8n → McpServer) é **leste-oeste**: o n8n e o McpServer vivem no **mesmo Container Apps environment** e conversam por **DNS interno**, **bypassando o gateway** (Invariante 7). Mesmo servidor de tools, dois caminhos de rede com propósitos distintos.
+
+> **A regra de ouro vale para os dois agentes.** O AI Agent do n8n, via MCP Client Tool, enxerga as tools do McpServer — mas para **agir** ele usa apenas os **sentidos** (`consultar_disponibilidade`, read-only). Nenhuma escrita SQL acontece dentro do workflow do n8n. O Agente 2 também só **lê** os fatos; quem orquestra a notificação é o workflow, não uma gravação no banco.
+
+### 10.3 O smoke didático (AC-11)
+
+A pergunta canônica que demonstra a Fase B ao vivo:
+
+```
+Usuário: "Me avise quando abrir ingresso VIP para a final"
+   → Gemini 2.5 Flash reconhece a intenção de AÇÃO (não de leitura)
+   → chama criar_alerta_ingresso(matchDescription: "final", categoria: "VIP")
+   → tool retorna { registrado: true, mensagem: "Alerta registrado. Você será notificado..." }
+   → webhook dispara o workflow "chat-alert-ingresso" no n8n
+   → o AI Agent do n8n executa (consulta disponibilidade via MCP, redige a notificação)
+```
+
+> **Compare com a F5 base.** Na F5 você pergunta "Tem ingresso para Brasil x Argentina?" e o Gemini escolhe um **sentido** (`consultar_disponibilidade`, read-only) — leitura. Aqui você pede "me avise" e o Gemini escolhe uma **mão** (`criar_alerta_ingresso`, ação). O **mesmo** chatbot, a **mesma** lista dinâmica via `tools/list` — só que agora o catálogo tem **8 tools** em vez de 7, e o Gemini distingue sozinho leitura de ação a partir das `[Description]`.
+
+### 10.4 O discriminador `ReadOnly` — uma propriedade estrutural auditável
+
+A separação entre **sentidos** e **mãos** não é uma convenção informal: ela é **auditável no protocolo**. Quando o front chama `tools/list`, o McpServer retorna **8 tools** com um discriminador explícito no schema:
+
+- **7 sentidos** com `readOnly: true` — `consultar_disponibilidade`, `verificar_ingresso`, `consultar_bracket`, `consultar_partidas`, `consultar_classificacao`, `consultar_time`, `consultar_estadio`.
+- **1 mão** sem `readOnly: true` (ou `readOnly: false`) — `criar_alerta_ingresso`.
+
+> **Por que isso é ouro didático.** Você consegue **provar**, só inspecionando o JSON de `tools/list`, quantas tools podem **modificar** o mundo: exatamente uma, e ela é nomeável. Não é preciso ler o código de cada handler para confiar na regra de ouro — o **contrato MCP** já carrega a informação de segurança. Um teste de contagem assegura "7 read-only + 1 action" e quebra o build se alguém transformar acidentalmente um sentido em mão (ou vice-versa). Em sistemas agênticos, tornar a capacidade de ação uma propriedade **estrutural e verificável** (em vez de um comentário no código) é a diferença entre confiar e **auditar**.
+
+### 10.5 Para onde isto vai (Fase C)
+
+A Fase B para no momento em que o AI Agent do n8n redige a notificação (mock via `httpbin.org/post`). A **Fase C** (Story 2.10, futura) fecha o ciclo: o AI Agent consulta uma **API externa** e emite um **FlowEvent** que aparece no **Flow Visualizer** da F6 — e é aí que o `correlationId` que nasceu na tool desta fase se torna visível ponta a ponta. Por isso ele já viaja propagado desde agora.

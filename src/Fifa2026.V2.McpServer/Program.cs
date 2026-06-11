@@ -41,6 +41,12 @@ builder.Services.AddScoped<EntraOidContext>();
 // HttpClient para o proxy de LLM (injeta a key server-side; ver LlmProxyEndpoints).
 builder.Services.AddHttpClient("llm", client => client.Timeout = TimeSpan.FromSeconds(30));
 
+// Story 2.9 (Fase B) — despacho fire-and-forget do alerta ao n8n (workflow
+// chat-alert-ingresso). Named client próprio com timeout de 5s (padrão F4);
+// URL via App Setting N8N_ALERT_WEBHOOK_URL (distinto de N8N_WEBHOOK_URL de F4).
+builder.Services.AddHttpClient(AlertWebhookNotifier.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(5));
+builder.Services.AddScoped<IAlertWebhookNotifier, AlertWebhookNotifier>();
+
 // ADE-002 Inv 1/2 — registra o MCP server com transporte HTTP (Streamable HTTP)
 // e descobre as tools marcadas com [McpServerToolType]/[McpServerTool] no assembly.
 // API confirmada contra ModelContextProtocol(.AspNetCore) 1.4.0 por reflexão:
