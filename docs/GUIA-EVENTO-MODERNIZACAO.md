@@ -278,7 +278,7 @@ Idem para o banco: a extension tem uma etapa **Assess** que lista *blocking issu
 
 1. Portal → busca **App Services** → **+ Create** → **Web App**.
 2. **Resource group:** `rg-prd-tik-paas-cin-001` (crie agora, na própria tela) · **Name:** `app-prd-tk-bend-cin-001`
-3. **Publish:** **Code** · **Runtime stack:** **Node 20 LTS** · **OS:** **Windows** ← (Windows mantém o **iisnode** e o `web.config` da sua API, igual à VM)
+3. **Publish:** **Code** · **Runtime stack:** **Node 24 LTS** · **OS:** **Windows** ← (Windows mantém o **iisnode** e o `web.config` da sua API, igual à VM)
 4. **Region:** **Central India** · **App Service Plan:** crie `asp-prd-tk-cin-001` · **Pricing plan:** **Basic B1**
 5. **Review + create** → **Create**.
 
@@ -333,7 +333,7 @@ az webapp deploy -g rg-prd-tik-paas-cin-001 -n app-prd-tk-bend-cin-001 --src-pat
 > ```
 > Se o `/api/health` responde, **o app está no ar** ✅. (O `/api/health/db` ainda vai falhar **de propósito** — o banco só conecta depois da **VNet** (3.4) e das **App Settings** (3.5). A validação completa é a Fase 3.6.)
 
-> ✅ **Confirmação extra (Portal/Kudu):** Web App com **Runtime = Node 20 / OS = Windows** (Fase 3.1) e o `web.config` presente em **Kudu → `site/wwwroot/`**.
+> ✅ **Confirmação extra (Portal/Kudu):** Web App com **Runtime = Node 24 / OS = Windows** (Fase 3.1) e o `web.config` presente em **Kudu → `site/wwwroot/`**.
 
 #### 3.3 Habilitar HTTPS Only e TLS mínimo
 
@@ -362,7 +362,7 @@ Aqui separamos as variáveis **não-banco** (App Settings) do **banco** (Connect
 | `JWT_SECRET` | `trocar_por_uma_string_longa_aleatoria` (mesmo estilo do `.env` — string longa com underscores; pode reusar a do `.env`) |
 | `JWT_EXPIRES_IN` | `7d` |
 | `FRONTEND_URL` | `*` (ajustamos para a URL do front na Fase 4) |
-| `WEBSITE_NODE_DEFAULT_VERSION` | `~20` |
+| `WEBSITE_NODE_DEFAULT_VERSION` | `~24` |
 
 > ⚠️ **Não existe `PORT=80` aqui.** No App Service **quem define a porta é a plataforma** — o iisnode injeta a porta certa e sua API já lê `process.env.PORT`. Por isso **não** adicione `PORT` nem `HOST`.
 
@@ -419,7 +419,7 @@ A `vm-fend` ainda serve o site e faz proxy `/api/*` para a `vm-bend`. Troque o d
 
 1. Portal → **App Services** → **+ Create** → **Web App**.
 2. **Resource group:** `rg-prd-tik-paas-cin-001` · **Name:** `app-prd-tk-fend-cin-001`
-3. **Publish:** **Code** · **Runtime:** **Node 20 LTS** · **OS:** **Windows** · **Plan:** o mesmo `asp-prd-tk-cin-001` (o B1 hospeda os dois apps).
+3. **Publish:** **Code** · **Runtime:** **Node 24 LTS** · **OS:** **Windows** · **Plan:** o mesmo `asp-prd-tk-cin-001` (o B1 hospeda os dois apps).
 4. **Create** → depois ligue **HTTPS Only** + **TLS 1.2** (como em 3.2).
 
 > 💡 **Mesmo plano, dois apps.** O App Service Plan é o "servidor"; cada Web App é um "site" nele. B1 acomoda os dois tranquilamente — você não paga a mais por isso.
