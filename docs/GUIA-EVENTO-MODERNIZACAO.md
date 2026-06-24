@@ -580,6 +580,86 @@ Do seu computador, abra **`https://www.<seu-domínio>`** (com cadeado válido):
 2. Os status passam por: *Creating → Preparing for copy → Copying → Copy finished → Rebuilding indexes → **Succeeded***. Clique no nome da origem para ver o detalhe **por tabela**.
 3. Para ~3 MB, conclui em poucos minutos. _(Nota: o DMS **pula tabelas vazias** — elas podem não aparecer na lista.)_
 
+> ✅ **Migração terminou com `Succeeded` em todas as tabelas? Então PULE a §5.5.1 inteira e vá direto para a §5.6.** A seção abaixo é **só para quem deu erro**.
+
+#### 5.5.1 ⚠️ CONTORNO — só se a migração FALHOU ou TRAVOU
+
+> 🛑🛑🛑 **LEIA ANTES DE FAZER QUALQUER COISA AQUI.**
+> Esta seção é uma **solução de contorno (plano B)**. Ela **NÃO faz parte do fluxo normal**.
+> **Se a sua migração da §5.5 terminou com `Succeeded`, NÃO execute nada desta seção — vá para a §5.6.**
+> Executar estes passos com a migração já bem-sucedida vai **APAGAR o banco que você acabou de migrar** e te obrigar a fazer tudo de novo. **Só siga aqui se viu erro/travamento.**
+
+**Quando usar:** alguma tabela ficou em **Failed/Canceled**, o status empacou em `Copying`/`Rebuilding indexes` e não anda, ou faltou uma tabela específica de verdade.
+
+##### Passo 1 — Confirmar se travou MESMO (acompanhe por tabela, não pelo app)
+
+A validação correta é **na própria tela do DMS, tabela por tabela** — não pelo app (testar só `/api/matches` engana, pois a tabela de jogos pode ter vindo e outra ter falhado).
+
+1. Portal → abra o **`dms-prd-tk-cin-001`** → **Overview → Monitor migrations** → aba **Migrations**.
+2. Clique no **nome da origem** (`FIFA2026Tickets`) → abre o **detalhe por tabela**.
+3. Olhe **tabela por tabela**:
+   - **Todas `Succeeded`** → migrou completo. **Saia daqui e vá para a §5.6.**
+   - Alguma **`Failed`/`Canceled`**, ou status geral parado em `Copying`/`Rebuilding` → migração **incompleta**, continue abaixo.
+
+> ⚠️ **Não confunda "tabela ausente" com "tabela com falha".** O DMS **não lista tabelas vazias** (ele as pula de propósito). Uma tabela que não aparece na lista pode ser só uma tabela **sem linhas** na origem — isso é **normal**, não é erro. Falha é a tabela aparecer **com status de erro**, não a ausência dela.
+
+##### Passo 2 — O que reaproveita (não refaça a fase inteira)
+
+| Recurso | Reaproveita? |
+|---|---|
+| DMS (`dms-prd-tk-cin-001`) | ✅ Sim |
+| SHIR na `vm-data` (nó verde) | ✅ Sim |
+| Servidor Azure SQL `sql-prd-tk-cin-001` | ✅ Sim |
+| **Database de destino (com dados parciais)** | ❌ **Tem que apagar** |
+
+Você só vai **re-disparar a migração**. O único bloqueio é o database destino "meio cheio" — o DMS não roda por cima de tabelas que já existem (erro de schema duplicado / chave primária).
+
+##### Passo 3 — Apagar o DATABASE de destino (o passo que mais esquecem)
+
+> 🛑 Apague o **DATABASE** `FIFA2026Tickets`, **NÃO o servidor** `sql-prd-tk-cin-001`. O servidor fica (mantém firewall, "Allow Azure services" e admin); só o banco dentro dele é apagado. Apagar o servidor por engano vira retrabalho.
+
+1. Portal → busque **`sql-prd-tk-cin-001`** → abra o **SQL server** (ícone de servidor, **não** o de database).
+2. Menu lateral → **SQL databases**.
+3. Clique no database **`FIFA2026Tickets`**.
+4. No topo → **🗑️ Delete**.
+5. Confirme: **marque a caixa** (e, se pedir, **digite o nome** `FIFA2026Tickets`) → **Delete**.
+6. Aguarde sumir da lista **SQL databases** (~30 s).
+
+**O próximo passo depende do caminho escolhido — e a diferença derruba aluno:**
+
+| Caminho | O database destino precisa... |
+|---|---|
+| **A) Re-rodar o DMS** | ...existir **VAZIO** → depois de apagar, **crie de novo** um database vazio com o mesmo nome |
+| **B) Importar o `.bacpac`** | ...**NÃO existir** → o Import **cria** o banco a partir do arquivo. Se já existir, o import **FALHA** |
+
+##### Passo 4 (Caminho A) — Re-rodar o DMS
+
+1. Recrie o database **vazio**: servidor `sql-prd-tk-cin-001` → **+ Create database** → **Database name** `FIFA2026Tickets` → mesmo servidor → mantenha o tier padrão → **Create**.
+2. DMS → **Overview → New migration** e refaça o wizard da §5.4:
+   - Source **SQL Server** / Target **Azure SQL Database** / mode **Offline**.
+   - Origem `10.30.1.4`, login `adminsql`, marque **Trust server certificate**.
+   - Destino `sql-prd-tk-cin-001.database.windows.net`, login `adminsql`.
+   - ⚠️ **Marque "Migrate Missing schema"** (o destino está vazio de novo → obrigatório).
+   - **Select all tables** → **Start migration**.
+3. Volte ao **Monitor migrations** e acompanhe **tabela por tabela** até **todas** darem **Succeeded**.
+
+##### Passo 5 (Caminho B) — Contorno com `.bacpac` (se o DMS insistir em travar)
+
+Banco minúsculo (~3 MB) → rápido e confiável. Dispensa DMS/SHIR.
+
+1. **Apague o database destino** (Passo 3) e **NÃO recrie** — o import cria o banco sozinho.
+2. Portal → servidor `sql-prd-tk-cin-001` → **Import database**.
+3. **Select backup** → aponte o `FIFA2026Tickets.bacpac` → **Database name** `FIFA2026Tickets` → confirme o tier → **OK**.
+4. Acompanhe em **Import/Export history** do servidor até concluir → valide.
+
+> Trade-off: o `.bacpac` não exercita o assessment de compatibilidade — mas destrava na hora.
+
+##### Os 3 erros que mais derrubam o aluno
+
+1. Achar que a tabela "sumida" falhou, quando o DMS **só pulou tabela vazia** → confira o **detalhe por tabela**, não a ausência.
+2. **Esquecer de apagar o database destino** antes de re-rodar → conflito de schema/PK.
+3. No `.bacpac`, **deixar o database criado** → import falha porque o banco já existe.
+
 > 🧩 **Assessment de compatibilidade (produção/escala).** Em ambiente grande, **antes** da migração você roda o **Azure Migrate** (SQL assessment): descobre o estado, aponta **incompatibilidades**, recomenda **tier/sizing** e estima custo — é o passo que separa "migrou" de "migrou com segurança". Para este schema simples não há bloqueios.
 
 > 🩹 **Atalho para DB pequeno (sem assessment):** se o tempo apertar, dá para importar o **`.bacpac`** direto no Portal (servidor `sql-prd-tk-cin-001` → **Import database**, apontando o `FIFA2026Tickets.bacpac`). É offline também, dispensa DMS/SHIR — mas **não valida compatibilidade**.
