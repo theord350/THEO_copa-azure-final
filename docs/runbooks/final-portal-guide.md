@@ -165,7 +165,7 @@ No **seu fork** → **Settings → Secrets and variables → Actions**, garanta 
 
 Em **Actions → "Lab A Final" → Run workflow → branch `main`** (após o merge do PR do lab — ver [Bloco 3](#bloco-3--entrega-retrospectiva-e-encerramento)), variando o `acao`:
 
-1. **`acao = mcp-server`** — `dotnet build/test` do McpServer, build & push da imagem no ACR (`cr<sufixo>.azurecr.io/mcp-server:<sha>`), `az containerapp update --image` (troca o placeholder) e aplica os App Settings sensíveis como secrets (`SqlConnectionString`, `GEMINI_API_KEY`, `GATEWAY_SHARED_SECRET`). Smoke `/health`.
+1. **`acao = mcp-server`** — `dotnet build/test` do McpServer, build & push da imagem no ACR (`cr<sufixo>.azurecr.io/mcp-server:<sha>`), `az containerapp update --image` (troca o placeholder) e aplica os App Settings sensíveis como secrets (`SqlConnectionString`, `GEMINI_API_KEY` e — se você optou pelo caminho do fork — `GATEWAY_SHARED_SECRET`; `GROQ`/`MISTRAL` só se presentes). **Smoke:** como o ingress do McpServer é **interno** (sem endereço público), o workflow **não** faz `curl /health` — ele confirma via `az` que a revisão ativa provisionou (`provisioningState = Provisioned`, `runningState = Running`). O smoke funcional (`tools/list` = 7 via gateway com Bearer) é o passo manual da [Fase 1.7](#17-smoke-do-mcpserver-via-gateway).
 2. **`acao = gateway`** — **rebuild do gateway** a partir de `lab-a-final` para pegar o hardening (`X-Gateway-Key` no cluster `mcp-server`). Troca a imagem do gateway; suas App Settings da Fase 1.4 permanecem.
 3. **`acao = frontend`** — `npm ci` + `vite build` (com `VITE_LLM_PROXY_URL`, `VITE_LLM_PROVIDER`) + deploy. O job tem um **guard** que falha se alguma key de LLM aparecer no bundle.
 
@@ -342,6 +342,7 @@ Nomes **fixos**; valores **seus**. (Referência: `deploy-phase-05.yml` + `deploy
 |---|---|---|
 | `ACR_LOGIN_SERVER` | `cr<sufixo>.azurecr.io` | F5 + F6 |
 | `PHASE02_RESOURCE_GROUP` | `<seu-rg>` | F5 + F6 |
+| `PHASE02_CONTAINERAPP_NAME` | `ca-gateway-<sufixo>` (o Container App do gateway das Quartas) | gateway (rebuild) |
 | `PHASE05_MCP_APP_NAME` | `ca-mcp-<sufixo>` | F5 |
 | `PHASE06_FLOW_APP_NAME` | `ca-flow-<sufixo>` | F6 |
 | `PHASE06_LOG_ANALYTICS_WORKSPACE_ID` | `<workspace-id>` | F6 |
@@ -352,6 +353,8 @@ Nomes **fixos**; valores **seus**. (Referência: `deploy-phase-05.yml` + `deploy
 | `VITE_LLM_PROVIDER` | `gemini` | frontend (chatbot) |
 | `VITE_GEMINI_MODEL` *(opcional)* | `gemini-2.5-flash` | frontend (chatbot) |
 | `VITE_FLOW_EVENTS_BASE_URL` | `https://<gateway-fqdn>/flow-events` | frontend (`/flow`) |
+
+> ⚠️ **Pré-requisito — recrie as Variables/Secrets das Quartas NESTE fork novo (o build do frontend reusa o MESMO Web App).** A Final **acrescenta** o chatbot e a rota `/flow` ao mesmo bundle das Quartas — ela **não** recria o front. Como o [Bloco 3](#bloco-3--entrega-retrospectiva-e-encerramento) manda **criar um fork NOVO** e as Variables/Secrets **não migram entre forks**, você precisa **criar também neste fork novo** — copiando os valores do seu fork das Quartas — as seguintes Variables que o job `frontend` do `lab-a-final.yml` injeta além das listadas acima: `VITE_CIAM_AUTHORITY`, `VITE_CIAM_CLIENT_ID`, `VITE_ADMIN_TENANT_ID`, `VITE_ADMIN_CLIENT_ID`, `VITE_ADMIN_SCOPE` (login CIAM + admin workforce), `GATEWAY_V2_URL`, `BACKEND_URL`, `FUNCTION_V2_URL` (gateway/backend/compra v2). **Se você não recriá-las aqui, o build passa verde mas publica um bundle com login CIAM e compra v2 mortos.** (O workflow aceita tanto o nome das Quartas quanto o prefixado da Final, ex.: `GATEWAY_V2_URL` **ou** `VITE_GATEWAY_V2_URL`.)
 
 ### Secrets
 
@@ -401,7 +404,7 @@ A branch do lab no repositório do evento (org **TFTEC**) chama-se **`lab-a-fina
 2. **Habilite o workflow na `main` do seu fork:** abra um **Pull Request `lab-a-final` → `main`** (base = `main`, compare = `lab-a-final`) **no próprio fork** e faça o **merge**. Esse PR é o "exercício" da aula — ele faz o `lab-a-final.yml` aparecer no Actions. (Você nunca dá PR no repo da TFTEC.)
 3. Rode os `acao` na ordem: **`mcp-server` → `gateway` → `flow-events` → `frontend`** (ou **`tudo`**).
 
-> **Nota @devops:** confirmar o nome final do workflow (`lab-a-final.yml`), o slot da branch curada `lab-a-final` no upstream TFTEC (a partir do estado pós-Story 3.1/3.2) e a lista definitiva de `acao`.
+> **Nota @devops:** o workflow `lab-a-final.yml` e a lista de `acao` (`mcp-server`/`gateway`/`flow-events`/`frontend`/`tudo`) já estão confirmados no repo. Pendente apenas: criar a branch curada `lab-a-final` no upstream TFTEC (a partir do estado pós-Story 3.1/3.2).
 
 ## Retrospectiva — o que você construiu (e por quê)
 
@@ -418,6 +421,12 @@ A branch do lab no repositório do evento (org **TFTEC**) chama-se **`lab-a-fina
 - Se alguém tentar `curl` direto no McpServer forjando `X-Entra-OID`, o que acontece? (401 — falta o `X-Gateway-Key`)
 - Onde está a chave do Gemini? (no proxy server-side; o front só conhece a URL do proxy)
 - Por que a notificação pós-compra não tem nó próprio? (trade-off da re-arquitetura: inline no Consumer)
+
+## Quiz de encerramento
+
+Feche a aula com o **quiz** (Google Forms — link fornecido pelo facilitador na sala): 8 perguntas rápidas sobre o que você construiu — MCP, RAG por tool-use, a regra de ouro por construção, `correlationId`/observabilidade, os 5 nós e a lição de simplificação (por que removemos a orquestração externa). Conteúdo-fonte das perguntas: [`docs/workshops/final/QUIZ.md`](../workshops/final/QUIZ.md).
+
+> 🔗 **Link do quiz:** `<informado pelo facilitador>` (o Forms é criado fora do repositório, padrão das Quartas).
 
 ---
 
@@ -472,5 +481,3 @@ A branch do lab no repositório do evento (org **TFTEC**) chama-se **`lab-a-fina
 | F6 — Gateway/Front | App Setting `FlowEventsUrl` + rota `/flow` (`VITE_FLOW_EVENTS_BASE_URL`) |
 | Automação | Fork: Variables + Secrets + workflow único **Lab A Final** (`mcp-server`/`flow-events`/`gateway`/`frontend`/`tudo`) |
 | Segurança | McpServer só-leitura por construção · chave Gemini nunca no bundle · X-Gateway-Key fecha o bypass · cache pós-auth |
-</content>
-</invoke>
