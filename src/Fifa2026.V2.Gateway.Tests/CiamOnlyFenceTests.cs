@@ -3,11 +3,7 @@ using System.Net.Http.Headers;
 using WireMock.RequestBuilders;
 using WireMock.ResponseBuilders;
 using Xunit;
-
-namespace Fifa2026.V2.Gateway.Tests;
-
-/// <summary>
-/// Story 3.5 (ADE-007 v1.3 Invariante 8.2) — FENCE <c>CiamOnly</c> na rota <c>/me</c>
+ly</c> na rota <c>/me</c>
 /// (proxy → <c>/api/v2/me</c>, cluster functions-f1). O item de maior risco de segurança
 /// da story: o endpoint resolve-or-provision DEVE ser autorizado SÓ para o esquema CIAM
 /// (cliente), NUNCA para o Admin (workforce). Sem o fence, como o transform X-Entra-OID é
